@@ -1,3 +1,4 @@
+![License: MIT](https://img.shields.io/github/license/DariuszNewecki/DAUBA)
 # DAUBA — Dumb And Ugly But Ambitious: The Self-Improving LLM Coding Workbench
 
 ## What is this?
