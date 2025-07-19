@@ -76,7 +76,7 @@ This project **starts as the dumbest possible thing that can work**—by design.
    [http://<server-ip>:5173](http://<server-ip>:5173)
    (or whatever port your frontend uses)
 
-![DAUBA Workbench Screenshot](docs/screenshot.png)
+![DAUBA Workbench Screenshot](docs/UI.png)
 
 ---
 
