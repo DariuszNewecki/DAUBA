@@ -7,13 +7,23 @@ __pycache__/
 env/
 venv/
 *.sqlite3
+.pytest_cache/
+pip-log.txt
+htmlcov/
+.coverage
+coverage.xml
+.mypy_cache/
+.tox/
 
 # Node/React frontend
 frontend/node_modules/
 frontend/dist/
+frontend/build/
+frontend/coverage/
 frontend/.env.local
 frontend/.next/
 frontend/.vercel/
+frontend/.cache/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -25,10 +35,12 @@ yarn-error.log*
 *.log
 *.swp
 
-# VSCode and IDEs
+# Editors/IDEs
 .vscode/
 .idea/
 *.iml
+*.sublime-workspace
+*.sublime-project
 
 # OS junk
 Thumbs.db

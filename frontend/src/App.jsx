@@ -1,4 +1,4 @@
-// DuBU/frontend/src/App.jsx
+// DAUBA/frontend/src/App.jsx
 
 import { useState } from "react";
 
@@ -66,36 +66,49 @@ function App() {
   };
 
   return (
-    <div style={{ maxWidth: 540, margin: "40px auto", fontFamily: "sans-serif" }}>
-      <h1>DuBU Playground</h1>
-      <form onSubmit={handleSend} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <textarea
-          rows={4}
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder='Enter your prompt (e.g. "Say hello, DuBU!")'
-          disabled={writing}
-        />
-        <button type="submit" disabled={writing || !prompt.trim()}>
-          {writing ? "Thinking..." : "Send"}
-        </button>
-      </form>
-      <div style={{ 
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+        alignItems: "center",
+        background: "#222",
+        fontFamily: "sans-serif"
+      }}
+    >
+      <div style={{ maxWidth: 540, width: "100%" }}>
+        <h1 style={{ color: "#fafafa" }}>DAUBA Workbench</h1>
+        <form onSubmit={handleSend} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <textarea
+            rows={4}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder='Enter your prompt (e.g. "Say hello, DAUBA!")'
+            disabled={writing}
+          />
+          <button type="submit" disabled={writing || !prompt.trim()}>
+            {writing ? "Thinking..." : "Send"}
+          </button>
+        </form>
+        <div style={{
           marginTop: 24,
           whiteSpace: "pre-wrap",
           background: "#fafafa",
           borderRadius: 8,
           padding: 16,
           minHeight: 80,
-          color: "#222" }}>
-        {response}
-        {pendingWrite && (
-          <div style={{ marginTop: 16 }}>
-            <button onClick={handleApprove} disabled={writing}>
-              Approve and Write File
-            </button>
-          </div>
-        )}
+          color: "#222"
+        }}>
+          {response}
+          {pendingWrite && (
+            <div style={{ marginTop: 16 }}>
+              <button onClick={handleApprove} disabled={writing}>
+                Approve and Write File
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

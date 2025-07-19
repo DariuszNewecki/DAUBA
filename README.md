@@ -76,6 +76,8 @@ This project **starts as the dumbest possible thing that can work**—by design.
    [http://<server-ip>:5173](http://<server-ip>:5173)
    (or whatever port your frontend uses)
 
+![DAUBA Workbench Screenshot](docs/screenshot.png)
+
 ---
 
 ## Example Prompts (How To Evolve the Tool)
@@ -116,3 +118,13 @@ This is not just a coding tool—it’s a living workbench for **incremental, AI
 We believe in starting ugly, moving fast, and fixing our sins as we go—by code, by prompt, or by community.
 
 **Join us. Help the system evolve, one prompt at a time.**
+
+---
+
+## Versioning & Releases
+
+Every milestone is preserved forever!
+
+* To use the historic v0.1 MVP, checkout the `v0.1` tag.
+* Future releases (v0.2, v1.0, etc.) will be tagged, with release notes describing every big leap.
+* Want to see how DAUBA/CORE grows? Just follow `main` or watch the Releases tab.
