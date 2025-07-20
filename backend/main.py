@@ -1,20 +1,16 @@
 # DAUBA/backend/main.py
-"""
-DAUBA Backend API Module
-Implements the user's desired review/approval flow with syntax checking.
-"""
 
 import os
 import re
+import json # Make sure json is imported
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
 from dotenv import load_dotenv
 
-# Import our new syntax checker
 from syntax_checker import check_syntax 
-from file_handler import add_pending_write, confirm_write, reject_pending_write, log_action
+from file_handler import add_pending_write, confirm_write, reject_pending_write, log_action, LOG_FILE
 
 load_dotenv()
 
@@ -27,8 +23,7 @@ if not all([LLM_API_URL, LLM_API_KEY, REPO_PATH]):
 
 FILE_WRITE_MARKER_PATTERN = re.compile(r"\[\[write:(.+?)\]\]\s*\n?([\s\S]*)", re.MULTILINE)
 
-# Version updated to reflect this new feature work
-app = FastAPI(title="DAUBA Backend API", version="0.4.1-alpha") 
+app = FastAPI(title="DAUBA Backend API", version="0.4.2-alpha") 
 
 app.add_middleware(
     CORSMiddleware,
@@ -63,32 +58,17 @@ def ask_llm(data: PromptRequest):
             suggested_path = match.group(1).strip()
             code_to_write = match.group(2).strip()
             
-            # Heuristic to clean up code block if fenced
             code_block_match = re.search(r"```(?:\w+)?\n([\s\S]*?)\n```", code_to_write)
             if code_block_match:
                 code_to_write = code_block_match.group(1).strip()
 
-            # --- NEW SYNTAX CHECK STEP ---
             is_valid, message = check_syntax(suggested_path, code_to_write)
 
             if not is_valid:
-                # If syntax is bad, log it and return an error message to the user.
-                log_action("syntax_check_failed", {
-                    "prompt": data.prompt,
-                    "file_path": suggested_path,
-                    "error": message
-                })
-                # We return a regular 'output' so the frontend displays it as a message.
+                log_action("syntax_check_failed", {"prompt": data.prompt, "file_path": suggested_path, "error": message})
                 return {"output": f"AI-generated code has a syntax error and was rejected:\n\n{message}\n\nPlease try rephrasing your prompt."}
-            # --- END OF NEW STEP ---
 
-            # If syntax is valid, proceed as before.
-            pending_id = add_pending_write(
-                prompt=data.prompt,
-                suggested_path=suggested_path,
-                code=code_to_write,
-                repo_base_path=REPO_PATH
-            )
+            pending_id = add_pending_write(prompt=data.prompt, suggested_path=suggested_path, code=code_to_write, repo_base_path=REPO_PATH)
             return {"pending_write_id": pending_id, "file_path": suggested_path, "code": code_to_write}
         else:
             log_action("ask", {"prompt": data.prompt, "response": llm_content})
@@ -96,8 +76,6 @@ def ask_llm(data: PromptRequest):
     except Exception as e:
         log_action("ask_error", {"prompt": data.prompt, "error": str(e)})
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
-
-# ... (the rest of the /confirm_write, /reject_write, and / endpoints are unchanged) ...
 
 @app.post("/confirm_write")
 def confirm_write_operation(data: WriteFileRequest):
@@ -116,3 +94,32 @@ def reject_write_operation(data: RejectWriteRequest):
 @app.get("/")
 def root():
     return {"DAUBA": "alive"}
+
+# --- NEW HISTORY ENDPOINT ---
+@app.get("/history")
+def get_history():
+    """
+    Reads the actions.log file and returns its contents as a list of JSON objects,
+    with the most recent entries first.
+    """
+    try:
+        history_entries = []
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    # Parse each line as a JSON object
+                    history_entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    # This makes the endpoint robust against corrupted log lines
+                    print(f"Warning: Skipping malformed line in actions.log: {line.strip()}")
+        
+        # Reverse the list to show the most recent actions first
+        history_entries.reverse()
+        return history_entries
+    except FileNotFoundError:
+        # If the log file doesn't exist yet, return an empty list
+        return []
+    except Exception as e:
+        print(f"Error reading history log: {e}")
+        raise HTTPException(status_code=500, detail="Could not read history log.")
+# --- END OF NEW ENDPOINT ---
