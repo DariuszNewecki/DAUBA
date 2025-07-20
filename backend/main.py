@@ -1,7 +1,7 @@
 # DAUBA/backend/main.py
 """
 DAUBA Backend API Module
-Implements the user's desired review/approval flow.
+Implements the user's desired review/approval flow with syntax checking.
 """
 
 import os
@@ -12,6 +12,8 @@ from pydantic import BaseModel
 import requests
 from dotenv import load_dotenv
 
+# Import our new syntax checker
+from syntax_checker import check_syntax 
 from file_handler import add_pending_write, confirm_write, reject_pending_write, log_action
 
 load_dotenv()
@@ -25,7 +27,8 @@ if not all([LLM_API_URL, LLM_API_KEY, REPO_PATH]):
 
 FILE_WRITE_MARKER_PATTERN = re.compile(r"\[\[write:(.+?)\]\]\s*\n?([\s\S]*)", re.MULTILINE)
 
-app = FastAPI(title="DAUBA Backend API", version="0.4.0")
+# Version updated to reflect this new feature work
+app = FastAPI(title="DAUBA Backend API", version="0.4.1-alpha") 
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,7 +57,7 @@ def ask_llm(data: PromptRequest):
         resp = requests.post(LLM_API_URL, headers=headers, json=body)
         resp.raise_for_status()
         llm_content = resp.json()["choices"][0]["message"]["content"]
-        match = FILE_WRITE_MARKER_PATTERN.search(llm_content) # Use .search() to find marker anywhere
+        match = FILE_WRITE_MARKER_PATTERN.search(llm_content)
 
         if match:
             suggested_path = match.group(1).strip()
@@ -65,6 +68,21 @@ def ask_llm(data: PromptRequest):
             if code_block_match:
                 code_to_write = code_block_match.group(1).strip()
 
+            # --- NEW SYNTAX CHECK STEP ---
+            is_valid, message = check_syntax(suggested_path, code_to_write)
+
+            if not is_valid:
+                # If syntax is bad, log it and return an error message to the user.
+                log_action("syntax_check_failed", {
+                    "prompt": data.prompt,
+                    "file_path": suggested_path,
+                    "error": message
+                })
+                # We return a regular 'output' so the frontend displays it as a message.
+                return {"output": f"AI-generated code has a syntax error and was rejected:\n\n{message}\n\nPlease try rephrasing your prompt."}
+            # --- END OF NEW STEP ---
+
+            # If syntax is valid, proceed as before.
             pending_id = add_pending_write(
                 prompt=data.prompt,
                 suggested_path=suggested_path,
@@ -78,6 +96,8 @@ def ask_llm(data: PromptRequest):
     except Exception as e:
         log_action("ask_error", {"prompt": data.prompt, "error": str(e)})
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+
+# ... (the rest of the /confirm_write, /reject_write, and / endpoints are unchanged) ...
 
 @app.post("/confirm_write")
 def confirm_write_operation(data: WriteFileRequest):
