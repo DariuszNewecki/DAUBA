@@ -1,6 +1,9 @@
 # Logs
 logs/
 
+# Utils it is functional testing only dir
+utils/
+
 # Python backend
 __pycache__/
 *.pyc
