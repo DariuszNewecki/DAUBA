@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from syntax_checker import check_syntax
 from context_handler import inject_context 
+from include_handler import inject_includes
 from file_handler import add_pending_write, confirm_write, reject_pending_write, log_action, LOG_FILE
 
 load_dotenv()
@@ -40,8 +41,14 @@ class RejectWriteRequest(BaseModel):
 def ask_llm(data: PromptRequest):
     original_prompt = data.prompt
 
-    # Inject context and get back enriched prompt and warnings
-    enriched_prompt, warnings = inject_context(original_prompt, REPO_PATH)
+    # Inject context
+    enriched_prompt, context_warnings = inject_context(original_prompt, REPO_PATH)
+
+    # Inject includes
+    enriched_prompt, include_warnings = inject_includes(enriched_prompt, REPO_PATH)
+
+    # Combine all warnings
+    all_warnings = context_warnings + include_warnings
 
     headers = {"Authorization": f"Bearer {LLM_API_KEY}", "Content-Type": "application/json"}
     body = {
@@ -56,8 +63,8 @@ def ask_llm(data: PromptRequest):
         resp.raise_for_status()
         llm_content = resp.json()["choices"][0]["message"]["content"]
 
-        if warnings:
-            warning_text = "Note: The following issues occurred while loading context:\n- " + "\n- ".join(warnings)
+        if all_warnings:
+            warning_text = "Note: The following issues occurred while loading context or includes:\n- " + "\n- ".join(all_warnings)
             llm_content = f"{warning_text}\n\n---\n\n{llm_content}"
 
         match = FILE_WRITE_MARKER_PATTERN.search(llm_content)
@@ -76,7 +83,7 @@ def ask_llm(data: PromptRequest):
                 log_action("syntax_check_failed", {
                     "prompt": original_prompt,
                     "enriched_prompt": enriched_prompt,
-                    "warnings": warnings,
+                    "warnings": all_warnings,
                     "error": message
                 })
                 return {"output": f"Syntax error rejected:\n\n{message}"}
@@ -91,7 +98,7 @@ def ask_llm(data: PromptRequest):
             log_action("write_suggested", {
                 "prompt": original_prompt,
                 "enriched_prompt": enriched_prompt,
-                "warnings": warnings,
+                "warnings": all_warnings,
                 "file_path": suggested_path,
                 "code": code_to_write
             })
@@ -105,7 +112,7 @@ def ask_llm(data: PromptRequest):
             log_action("ask", {
                 "prompt": original_prompt,
                 "enriched_prompt": enriched_prompt,
-                "warnings": warnings,
+                "warnings": all_warnings,
                 "response": llm_content
             })
             return {"output": llm_content}
