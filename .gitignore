@@ -2,7 +2,7 @@
 logs/
 
 # Utils it is functional testing only dir
-utils/
+sandbox/
 
 # Python backend
 __pycache__/
