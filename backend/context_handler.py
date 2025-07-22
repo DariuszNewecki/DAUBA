@@ -3,7 +3,7 @@
 Handles the logic for the [[context:...]] directive.
 
 Parses the directive, safely loads file contents, and injects them
-into the prompt before it's sent to the LLM.
+into the prompt before it's sent to the LLM. Applies fallback clipping for large files.
 """
 
 import os
@@ -16,12 +16,10 @@ CONTEXT_DIRECTIVE_PATTERN = re.compile(r"\[\[context:\s*(.+?)\s*\]\]", re.IGNORE
 
 # Default token limit (can be adjusted)
 MAX_CONTEXT_TOKENS = 1000
+MAX_TOKENS_PER_FILE = 500
 
 
 def parse_context_directive(prompt: str) -> Tuple[List[str], str]:
-    """
-    Extract file paths from the [[context:...]] directive and return cleaned prompt.
-    """
     match = CONTEXT_DIRECTIVE_PATTERN.search(prompt)
     if not match:
         return [], prompt.strip()
@@ -33,7 +31,6 @@ def parse_context_directive(prompt: str) -> Tuple[List[str], str]:
 
 
 def resolve_path_safe(base_path: str, relative_path: str) -> str:
-    """Safely resolve file path and prevent path traversal."""
     full_path = os.path.abspath(os.path.join(base_path, relative_path))
     if not full_path.startswith(os.path.abspath(base_path)):
         raise ValueError("Path traversal detected")
@@ -42,38 +39,36 @@ def resolve_path_safe(base_path: str, relative_path: str) -> str:
 
 def extract_high_signal_blocks(code: str) -> str:
     """
-    Extract top-level imports, function/class definitions, and docstrings using AST.
+    Extract top-level imports, function/class headers, and docstrings using AST.
+    Long bodies are skipped or truncated with placeholders.
     """
     try:
         parsed = ast.parse(code)
         blocks = []
 
         for node in parsed.body:
-            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
                 blocks.append(ast.get_source_segment(code, node))
+
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                header = f"\n# --- {node.__class__.__name__}: {node.name} ---\n"
+                docstring = ast.get_docstring(node)
+                doc_block = f'"""{docstring}"""' if docstring else ""
+                blocks.append(f"{header}{doc_block}\n# ... clipped ...")
+
             elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Str):
-                # Top-level docstring
-                blocks.append(ast.get_source_segment(code, node))
-            elif isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
                 blocks.append(ast.get_source_segment(code, node))
 
         return "\n\n".join([b for b in blocks if b])
     except Exception:
-        return code  # Fallback: return raw file
+        return "# WARNING: Failed to parse file with AST. Injecting raw content.\n" + code
 
 
 def estimate_token_count(text: str) -> int:
-    """Rough token estimate based on whitespace."""
     return len(text.split())
 
 
 def inject_context(prompt: str, repo_path: str, max_tokens: int = MAX_CONTEXT_TOKENS) -> Tuple[str, List[str]]:
-    """
-    Parses the [[context:...]] directive and injects valid file content into the prompt.
-
-    Returns:
-        Tuple[str, List[str]]: (final prompt, list of warnings)
-    """
     file_paths, clean_prompt = parse_context_directive(prompt)
     context_blocks = []
     warnings = []
@@ -85,15 +80,27 @@ def inject_context(prompt: str, repo_path: str, max_tokens: int = MAX_CONTEXT_TO
             with open(resolved_path, 'r', encoding='utf-8') as f:
                 raw_content = f.read()
 
-            context = extract_high_signal_blocks(raw_content)
-            tokens = estimate_token_count(context)
+            estimated_full = estimate_token_count(raw_content)
+
+            if estimated_full <= MAX_TOKENS_PER_FILE:
+                content = raw_content
+                clipped = False
+            else:
+                content = extract_high_signal_blocks(raw_content)
+                clipped = True
+
+            tokens = estimate_token_count(content)
 
             if tokens > token_budget:
-                context = f"# [TRUNCATED] Context from {file_path} exceeded token limit.\n"
-                warnings.append(f"Truncated: {file_path} exceeds token budget")
+                warnings.append(f"Skipping {file_path}: not enough token budget ({token_budget} left, needed {tokens})")
                 continue
 
-            context_blocks.append(f"--- START CONTEXT FROM: {file_path} ---\n{context}\n--- END CONTEXT FROM: {file_path} ---")
+            block_header = f"--- START CONTEXT FROM: {file_path} ---\n"
+            if clipped:
+                block_header += "# NOTE: File was too large. Injected high-signal content only.\n"
+                warnings.append(f"Clipped {file_path} to fit token budget")
+
+            context_blocks.append(f"{block_header}{content}\n--- END CONTEXT FROM: {file_path} ---")
             token_budget -= tokens
 
         except FileNotFoundError:

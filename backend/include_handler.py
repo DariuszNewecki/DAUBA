@@ -1,86 +1,89 @@
 # DAUBA/backend/include_handler.py
 """
-Handles the [[include:...]] directive.
+Handles the logic for the [[include:...]] directive.
 
-Supports full file inclusion or selective function/class inclusion
-based on the syntax:
-  [[include:path/to/file.py]]
-  [[include:path/to/file.py:function=func_name]]
+Safely resolves paths, parses include targets (functions/classes), and
+injects selected blocks or full files into the prompt. Large files are
+clipped to avoid overloading the LLM.
 """
 
 import os
 import re
 import ast
-from typing import Tuple, Optional
+from typing import List, Tuple
 
-INCLUDE_DIRECTIVE_PATTERN = re.compile(r"\[\[include:\s*(.+?)\s*\]\]", re.IGNORECASE)
+INCLUDE_DIRECTIVE_PATTERN = re.compile(r"\[\[include:(.+?)\]\]", re.IGNORECASE)
+MAX_INCLUDE_TOKENS = 2000
 
+def _estimate_token_count(text: str) -> int:
+    """Rough token estimate based on word count."""
+    return len(text.split())
 
-def extract_function_or_class(source_code: str, name: str) -> Optional[str]:
-    """Extract a function or class definition from source code."""
+def _extract_named_function_or_class(code: str, name: str) -> str:
+    """Extract a specific function or class by name from the source code."""
     try:
-        tree = ast.parse(source_code)
-        for node in ast.iter_child_nodes(tree):
+        tree = ast.parse(code)
+        for node in tree.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name:
-                return ast.get_source_segment(source_code, node)
-    except SyntaxError:
-        return None
-    return None
+                return ast.get_source_segment(code, node)
+    except Exception as e:
+        return f"# Failed to extract '{name}': {e}"
+    return f"# Could not find target: {name}"
 
-
-def inject_includes(prompt: str, repo_path: str) -> Tuple[str, list[str]]:
+def inject_includes(prompt: str, repo_path: str) -> Tuple[str, List[str]]:
     """
-    Parses [[include:...]] directives and injects the referenced code
-    into the prompt under an # Included: block.
+    Parses [[include:...]] directives and injects selected file/code blocks.
 
     Returns:
-        Tuple of (modified_prompt, warnings_list)
+        Tuple[str, List[str]]: The enriched prompt and any warnings.
     """
-    warnings = []
     matches = INCLUDE_DIRECTIVE_PATTERN.findall(prompt)
+    warnings = []
+    included_blocks = []
     clean_prompt = INCLUDE_DIRECTIVE_PATTERN.sub("", prompt).strip()
 
-    included_blocks = []
     for raw in matches:
-        path_part, _, fragment = raw.partition(":")
-        file_path = path_part.strip()
-        fragment = fragment.strip() if fragment else None
-
-        abs_path = os.path.abspath(os.path.join(repo_path, file_path))
-        abs_repo_path = os.path.abspath(repo_path)
-
-        if not abs_path.startswith(abs_repo_path):
-            warnings.append(f"Skipped unsafe include path: {file_path}")
-            continue
-
-        if not os.path.exists(abs_path):
-            warnings.append(f"Include file not found: {file_path}")
-            continue
+        file_part, target = raw.split(':', 1) if ':' in raw else (raw, None)
+        file_path = file_part.strip()
 
         try:
-            with open(abs_path, "r", encoding="utf-8") as f:
-                content = f.read()
+            full_path = os.path.abspath(os.path.join(repo_path, file_path))
+            if not full_path.startswith(os.path.abspath(repo_path)):
+                warnings.append(f"Skipped unsafe include outside repo: {file_path}")
+                continue
 
-            if fragment.startswith("function="):
-                func_name = fragment.split("=", 1)[1].strip()
-                snippet = extract_function_or_class(content, func_name)
-                if snippet:
-                    included_blocks.append(
-                        f"--- INCLUDED: {file_path} (function={func_name}) ---\n{snippet}\n--- END ---"
-                    )
+            with open(full_path, 'r', encoding='utf-8') as f:
+                code = f.read()
+
+            # --- Enforce token budget for full-file includes ---
+            if not target and _estimate_token_count(code) > MAX_INCLUDE_TOKENS:
+                warnings.append(f"Include skipped: '{file_path}' exceeds token limit.")
+                included_blocks.append(f"# SKIPPED large include: {file_path}")
+                continue
+
+            if target:
+                if '=' in target:
+                    key, val = target.split('=', 1)
+                    val = val.strip()
+                    if key.strip() in {"function", "class"}:
+                        snippet = _extract_named_function_or_class(code, val)
+                        included_blocks.append(f"# Included from {file_path}:{key}={val}\n{snippet}")
+                    else:
+                        warnings.append(f"Unsupported target type in: {raw}")
                 else:
-                    warnings.append(f"Function '{func_name}' not found in {file_path}")
+                    warnings.append(f"Malformed include target: {raw}")
             else:
-                included_blocks.append(
-                    f"--- INCLUDED: {file_path} ---\n{content}\n--- END ---"
-                )
+                included_blocks.append(f"# Included from {file_path}\n{code}")
 
+        except FileNotFoundError:
+            warnings.append(f"File not found: {file_path}")
         except Exception as e:
-            warnings.append(f"Error reading include file {file_path}: {e}")
+            warnings.append(f"Error reading include '{file_path}': {e}")
 
-    if not included_blocks:
-        return clean_prompt, warnings
+    if included_blocks:
+        injected_block = "\n\n".join(included_blocks)
+        final_prompt = f"# Included Code Blocks\n{injected_block}\n\n# User Prompt\n{clean_prompt}"
+    else:
+        final_prompt = clean_prompt
 
-    injected_section = "\n\n".join(included_blocks)
-    final_prompt = f"{injected_section}\n\n# User Request:\n{clean_prompt}"
     return final_prompt, warnings

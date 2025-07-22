@@ -9,6 +9,7 @@ from pydantic import BaseModel
 import requests
 from dotenv import load_dotenv
 
+from black_formatter import format_code_with_black  # NEW: code formatter
 from syntax_checker import check_syntax
 # from context_handler import inject_context, inject_includes
 from context_handler import inject_context
@@ -30,7 +31,7 @@ if not all([LLM_API_URL, LLM_API_KEY, REPO_PATH]):
 
 FILE_WRITE_MARKER_PATTERN = re.compile(r"\[\[write:(.+?)\]\]\s*\n?([\s\S]*)", re.MULTILINE)
 
-app = FastAPI(title="DAUBA Backend API", version="0.6.1-alpha")
+app = FastAPI(title="DAUBA Backend API", version="0.4.1-alpha")
 
 @app.on_event("startup")
 async def startup_event():
@@ -99,6 +100,12 @@ def ask_llm(data: PromptRequest):
             code_block_match = re.search(r"```(?:\w+)?\n([\s\S]*?)\n```", code_to_write)
             if code_block_match:
                 code_to_write = code_block_match.group(1).strip()
+
+            formatted_code, format_error = format_code_with_black(code_to_write)
+            if format_error:
+                log_action("formatting_failed", {"prompt": original_prompt, "error": format_error})
+                return {"output": f"Black formatting failed:\n\n{format_error}"}
+            code_to_write = formatted_code  # Use formatted version
 
             is_valid, message = check_syntax(suggested_path, code_to_write)
             if not is_valid:
