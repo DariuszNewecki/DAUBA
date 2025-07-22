@@ -1,114 +1,105 @@
 # DAUBA/backend/suggest_handler.py
+
 """
 Handles the logic for the [[suggest:...]] directive.
 
-Parses the directive, safely loads the specified file, extracts the selected
-lines plus a surrounding context window, and injects this block into the prompt.
+Supports injecting one or more line-based code segments into the prompt,
+with optional context windows for surrounding lines.
 """
 
 import os
 import re
 from typing import Tuple, List
 
-# Regex to find one or more suggest directives.
-# Example: [[suggest:src/file.py:23-31]]
+# Regex to find one or more suggest directives like [[suggest:path/to/file.py:10-20]]
 SUGGEST_DIRECTIVE_PATTERN = re.compile(r"\[\[suggest:\s*(.+?)\s*\]\]", re.IGNORECASE)
 
+# How many extra lines to include before and after the specified block
+DEFAULT_CONTEXT_WINDOW = 10
+
+
 def _resolve_path_safe(base_path: str, relative_path: str) -> str:
-    """Safely resolve file path and prevent path traversal."""
-    full_path = os.path.abspath(os.path.join(base_path, relative_path))
-    if not full_path.startswith(os.path.abspath(base_path)):
+    """Safely resolve a path inside the repo, preventing path traversal."""
+    base_abs = os.path.abspath(base_path)
+    full_path = os.path.abspath(os.path.join(base_abs, relative_path))
+    if os.path.commonpath([base_abs, full_path]) != base_abs:
         raise ValueError(f"Path traversal detected for '{relative_path}'")
     if not os.path.isfile(full_path):
-        raise FileNotFoundError(f"File does not exist at '{relative_path}'")
+        raise FileNotFoundError(f"File does not exist: '{relative_path}'")
     return full_path
 
-def _extract_context_window(lines: List[str], start: int, end: int, window: int = 10) -> Tuple[str, int, int]:
+
+def _extract_context_window(lines: List[str], start: int, end: int, window: int = DEFAULT_CONTEXT_WINDOW) -> Tuple[str, int, int]:
     """
     Extracts a slice of lines with a surrounding context window.
-    Line numbers are 1-based and inclusive.
+    Returns the extracted block and the actual line range injected.
     """
-    # Convert 1-based line numbers to 0-based list indices
     start_idx = max(0, start - 1)
     end_idx = min(len(lines), end)
 
-    # Calculate the context window boundaries
-    context_start_idx = max(0, start_idx - window)
-    context_end_idx = min(len(lines), end_idx + window)
+    context_start = max(0, start_idx - window)
+    context_end = min(len(lines), end_idx + window)
 
-    # Extract the code block and determine the actual start/end line numbers
-    code_block = "".join(lines[context_start_idx:context_end_idx])
-    actual_start_line = context_start_idx + 1
-    actual_end_line = context_end_idx
+    block = "".join(lines[context_start:context_end])
+    return block, context_start + 1, context_end
 
-    return code_block, actual_start_line, actual_end_line
 
 def inject_suggestions(prompt: str, repo_path: str) -> Tuple[str, List[str]]:
     """
-    Finds all [[suggest:...]] directives, loads the specified code blocks,
-    and injects them into the prompt.
+    Resolves and injects all [[suggest:...]] blocks into the prompt.
 
-    For now, only the first valid directive is processed to keep the MVP simple.
+    Returns:
+        (final prompt string, list of user-visible warnings)
     """
     matches = SUGGEST_DIRECTIVE_PATTERN.findall(prompt)
-    warnings = []
-
-    # Per the design, only handle the first match for now.
     if not matches:
-        return prompt, warnings
+        return prompt.strip(), []
 
-    target_str = matches[0]
+    warnings = []
+    suggestion_blocks = []
 
-    # Replace the directive in the prompt immediately. We will either fill this
-    # space with the code block or an error message.
-    clean_prompt = SUGGEST_DIRECTIVE_PATTERN.sub("{SUGGEST_BLOCK}", prompt, count=1).strip()
+    for directive in matches:
+        try:
+            parts = directive.split(":")
+            if len(parts) != 2:
+                raise ValueError("Malformed directive — expected format: file.py:start-end")
 
-    injected_block = "# SUGGEST CONTEXT UNAVAILABLE: Malformed directive."
+            file_path, line_range = parts
+            start_str, end_str = line_range.split("-")
+            start_line = int(start_str)
+            end_line = int(end_str)
 
-    try:
-        # Parse the directive: path/to/file.py:start-end
-        parts = target_str.split(':')
-        if len(parts) != 2:
-            raise ValueError("Malformed directive. Expected format: 'path/to/file.py:start-end'.")
+            if start_line < 1 or end_line < start_line:
+                raise ValueError("Invalid line range in directive.")
 
-        file_path, line_range = parts
+            resolved_path = _resolve_path_safe(repo_path, file_path)
+            with open(resolved_path, "r", encoding="utf-8") as f:
+                all_lines = f.readlines()
 
-        if '-' not in line_range:
-            raise ValueError("Malformed line range. Expected format: 'start-end'.")
+            code_block, actual_start, actual_end = _extract_context_window(all_lines, start_line, end_line)
 
-        start_line_str, end_line_str = line_range.split('-')
-        start_line = int(start_line_str)
-        end_line = int(end_line_str)
+            suggestion_blocks.append(
+                "--- START SUGGEST CONTEXT ---\n"
+                f"File: {file_path}\n"
+                f"Lines: {actual_start}-{actual_end} (selection was {start_line}-{end_line})\n"
+                "```\n"
+                f"{code_block.strip()}\n"
+                "```\n"
+                "--- END SUGGEST CONTEXT ---"
+            )
 
-        if start_line > end_line or start_line < 1:
-            raise ValueError("Invalid line range.")
+        except (ValueError, FileNotFoundError) as e:
+            warnings.append(f"[[suggest:{directive}]] → {e}")
+        except Exception as e:
+            warnings.append(f"[[suggest:{directive}]] → Unexpected error: {e}")
 
-        # Safely load the file
-        resolved_path = _resolve_path_safe(repo_path, file_path)
-        with open(resolved_path, 'r', encoding='utf-8') as f:
-            all_lines = f.readlines()
+    # Remove all suggest directives from the prompt
+    clean_prompt = SUGGEST_DIRECTIVE_PATTERN.sub("", prompt).strip()
 
-        # Extract the code with its context window
-        code_block, actual_start, actual_end = _extract_context_window(all_lines, start_line, end_line)
-
-        injected_block = (
-            "--- START SUGGEST CONTEXT ---\n"
-            f"File: {file_path}\n"
-            f"Lines: {actual_start}-{actual_end} (selection was {start_line}-{end_line})\n"
-            "```\n"
-            f"{code_block.strip()}\n"
-            "```\n"
-            "--- END SUGGEST CONTEXT ---"
-        )
-
-    except (ValueError, FileNotFoundError) as e:
-        injected_block = f"# SUGGEST CONTEXT UNAVAILABLE: {e}"
-        warnings.append(str(e))
-    except Exception as e:
-        injected_block = f"# SUGGEST CONTEXT UNAVAILABLE: An unexpected error occurred."
-        warnings.append(f"Error processing suggest directive '{target_str}': {e}")
-
-    # Replace the placeholder with the final block (either code or error message)
-    final_prompt = clean_prompt.replace("{SUGGEST_BLOCK}", injected_block)
+    if suggestion_blocks:
+        injected = "\n\n".join(suggestion_blocks)
+        final_prompt = f"# Suggested Context Blocks\n{injected}\n\n# User Prompt\n{clean_prompt}"
+    else:
+        final_prompt = clean_prompt
 
     return final_prompt, warnings

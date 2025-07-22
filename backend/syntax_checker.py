@@ -1,37 +1,37 @@
 # DAUBA/backend/syntax_checker.py
+
 """
 A simple syntax checker utility for DAUBA.
 
-This module provides functions to validate the syntax of generated code
-before it is staged for review or written to a file.
+Validates the syntax of Python code before it's staged for write/commit.
 """
 
 import ast
+from typing import Tuple
 
-def check_syntax(file_path: str, code: str) -> tuple[bool, str]:
+
+def check_syntax(file_path: str, code: str) -> Tuple[bool, str]:
     """
-    Checks the syntax of a given code string based on its file extension.
-
-    Currently supports Python (.py) files. For other file types, it assumes
-    the syntax is valid.
+    Checks whether the given code has valid syntax.
 
     Args:
-        file_path (str): The path of the file to be written (used to determine language).
-        code (str): The source code to check.
+        file_path (str): File name (used to detect .py files)
+        code (str): Source code string
 
     Returns:
-        tuple[bool, str]: A tuple containing:
-                          - A boolean indicating if the syntax is valid.
-                          - A message (either 'Syntax is valid' or an error string).
+        (is_valid: bool, message: str)
     """
-    if file_path.endswith(".py"):
-        try:
-            ast.parse(code)
-            return (True, "Python syntax is valid.")
-        except SyntaxError as e:
-            # Provide a helpful error message from the exception
-            error_message = f"Invalid Python syntax: {e.text.strip()}\nOn line {e.lineno}, column {e.offset}: {e.msg}"
-            return (False, error_message)
-    
-    # For now, we don't check other file types, so we approve them by default.
-    return (True, "Syntax check skipped for non-Python file.")
+    if not file_path.endswith(".py"):
+        return True, "Syntax check skipped for non-Python file."
+
+    try:
+        ast.parse(code)
+        return True, "Python syntax is valid."
+    except SyntaxError as e:
+        # In rare cases, e.text may be None
+        error_line = e.text.strip() if e.text else "<source unavailable>"
+        return False, (
+            f"Invalid Python syntax:\n"
+            f"{error_line}\n"
+            f"Line {e.lineno}, column {e.offset}: {e.msg}"
+        )
