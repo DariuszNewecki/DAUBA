@@ -32,14 +32,34 @@ This project **starts as the dumbest possible thing that can work**—by design.
 
 ---
 
+## ✅ What Works Today (v0.4 Highlights)
+
+DAUBA is no longer just a raw MVP. The following features are **fully working** in the latest release (`v0.4.0`):
+
+- `[[write:file.py]]`: Writes code to disk, but only after passing:
+  - ✅ Black formatting
+  - ✅ Ruff linting
+  - ✅ Syntax checking
+  - ✅ Semantic validation (e.g. no `eval()`, no bad imports)
+- `[[include:file.py]]`: Inject full file or specific function/class
+- `[[context:...]]`: Inject multiple files with automatic AST clipping
+- `[[suggest:file.py:10–20]]`: Add line-range context to your prompts
+- `[[manifest]]`: Injects your project manifest into prompts
+- Safe by default: DAUBA refuses to write or read outside your repo root
+- Git integration: Auto-commits approved writes with prompt-based commit messages
+
+> **v0.4 = DAUBA gets its first sense of correctness.**
+
+To see what’s coming next, check the [Roadmap](docs/roadmap.md).
+
+---
+
 ## Known Limitations and Sins (that we intend to fix)
 
 * **Security:** No authentication. If you run this on an open network, you’re asking for trouble.
 * **Dangerous Writes:** LLM can overwrite any local file you point it at. Double-check prompts!
 * **LLM Hallucination:** The AI might generate code that breaks things. *You* are the reviewer…for now.
 * **No Undo:** Accidentally nuked a file? Use git or your file system backup.
-* **No Code Style Consistency:** Output is as random as the LLM you use.
-* **No Project Context:** LLM can’t “see” your full repo unless you feed it context.
 * **No Multi-user or History:** One chat window, one user. That’s it.
 * **API Keys in .env:** Don’t commit your .env file!
 
@@ -84,7 +104,7 @@ This project **starts as the dumbest possible thing that can work**—by design.
 ## Example Prompts (How To Evolve the Tool)
 
 * "Create a function in utils/math.py that adds two numbers"
-* "Write a test for the function in tests/test\_math.py"
+* "Write a test for the function in tests/test_math.py"
 * "Add a page to the UI that lists all Python files in the repo"
 * "Implement syntax checking for all generated code before writing"
 
@@ -124,8 +144,12 @@ We believe in starting ugly, moving fast, and fixing our sins as we go—by code
 
 ## Versioning & Releases
 
-Every milestone is preserved forever!
+Every milestone is preserved and tagged:
 
-* To use the historic v0.1 MVP, checkout the `v0.1` tag.
-* Future releases (v0.2, v1.0, etc.) will be tagged, with release notes describing every big leap.
-* Want to see how DAUBA/CORE grows? Just follow `main` or watch the Releases tab.
+- `v0.1`: Raw prompt → response → write flow (no checks)
+- `v0.2`: Approve-before-write, syntax check
+- `v0.3`: Context awareness (`[[include]]`, `[[suggest]]`, `[[context]]`)
+- `v0.4`: Local quality enforcement — format, lint, check, and commit
+- `main`: Bleeding edge. Tracks ongoing development toward v0.5+
+
+See the [Releases tab](https://github.com/DariuszNewecki/DAUBA/releases) for full changelogs.
