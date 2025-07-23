@@ -4,12 +4,18 @@
 Runs pytest against the local /tests directory and captures results.
 
 Used to verify correctness after a file write, or to power future test dashboards.
+Also logs test results to logs/test_results.log with timestamp.
 """
 
 import subprocess
 import os
+import json
+import datetime
 from typing import Dict
 
+LOG_DIR = "logs"
+LOG_FILE = os.path.join(LOG_DIR, "test_results.log")
+os.makedirs(LOG_DIR, exist_ok=True)
 
 def run_tests(silent: bool = True) -> Dict[str, str]:
     """
@@ -24,47 +30,47 @@ def run_tests(silent: bool = True) -> Dict[str, str]:
             "stdout": str,
             "stderr": str,
             "summary": str (short outcome),
+            "timestamp": str (UTC ISO format),
         }
     """
+    result = {
+        "exit_code": "-1",
+        "stdout": "",
+        "stderr": "",
+        "summary": "❌ Unknown error",
+        "timestamp": datetime.datetime.utcnow().isoformat()
+    }
+
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     tests_path = os.path.join(repo_root, "tests")
     cmd = ["pytest", tests_path, "--tb=short", "-q"]
+
     try:
-        result = subprocess.run(
+        proc = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             check=False
         )
+        result["exit_code"] = str(proc.returncode)
+        result["stdout"] = proc.stdout.strip()
+        result["stderr"] = proc.stderr.strip()
+        result["summary"] = _summarize(proc.stdout)
 
-        summary = _summarize(result.stdout)
         if not silent:
-            print(result.stdout)
-            if result.stderr:
-                print("⚠️ stderr:", result.stderr)
-
-        return {
-            "exit_code": str(result.returncode),
-            "stdout": result.stdout.strip(),
-            "stderr": result.stderr.strip(),
-            "summary": summary,
-        }
+            print(proc.stdout)
+            if proc.stderr:
+                print("⚠️ stderr:", proc.stderr)
 
     except FileNotFoundError:
-        return {
-            "exit_code": "-1",
-            "stdout": "",
-            "stderr": "pytest is not installed or not found in PATH.",
-            "summary": "❌ Pytest not available"
-        }
-
+        result["stderr"] = "pytest is not installed or not found in PATH."
+        result["summary"] = "❌ Pytest not available"
     except Exception as e:
-        return {
-            "exit_code": "-1",
-            "stdout": "",
-            "stderr": str(e),
-            "summary": "❌ Test run error"
-        }
+        result["stderr"] = str(e)
+        result["summary"] = "❌ Test run error"
+
+    _log_test_result(result)
+    return result
 
 
 def _summarize(output: str) -> str:
@@ -76,3 +82,11 @@ def _summarize(output: str) -> str:
         if "passed" in line or "failed" in line or "error" in line:
             return line.strip()
     return "No test summary found."
+
+
+def _log_test_result(data: Dict[str, str]):
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(data) + "\n")
+    except Exception as e:
+        print(f"Warning: Failed to write test log: {e}")

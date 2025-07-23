@@ -16,8 +16,9 @@ from ruff_linter import lint_code_with_ruff
 from context_handler import inject_context
 from include_handler import inject_includes
 from manifest_handler import inject_manifest
-from suggest_handler import inject_suggestions
 from manifest_loader import load_manifest
+from test_runner import run_tests 
+from suggest_handler import inject_suggestions
 from file_handler import (
     add_pending_write,
     confirm_write,
@@ -196,6 +197,33 @@ def get_history():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not read history log: {e}")
 
+class StageRequest(BaseModel):
+    prompt: str
+    suggested_path: str
+    code: str
+    repo_base_path: str
+
+class ConfirmRequest(BaseModel):
+    pending_id: str
+    repo_base_path: str
+
+@app.post("/stage_write")
+def stage_write(req: StageRequest):
+    pending_id = add_pending_write(
+        prompt=req.prompt,
+        suggested_path=req.suggested_path,
+        code=req.code,
+        repo_base_path=req.repo_base_path,
+    )
+    return {"pending_id": pending_id}
+
+@app.post("/confirm_write")
+def confirm_write_route(req: ConfirmRequest):
+    return confirm_write(req.pending_id, req.repo_base_path)
+
+@app.post("/run_tests")
+def run_tests_route():
+    return run_tests(silent=False)
 
 @app.get("/")
 def root():
