@@ -18,6 +18,7 @@ from include_handler import inject_includes
 from manifest_handler import inject_manifest
 from manifest_loader import load_manifest
 from test_runner import run_tests
+from inject_analysis import inject_analysis
 from suggest_handler import inject_suggestions
 from project_manifest import get_project_goals, get_required_capabilities
 from file_handler import (
@@ -105,7 +106,10 @@ def ask_llm(data: PromptRequest):
     prompt3, include_warnings = inject_includes(prompt2, REPO_PATH)
     all_warnings.extend(include_warnings)
 
-    enriched_prompt, context_warnings = inject_context(prompt3, REPO_PATH)
+    prompt4, analysis_warnings = inject_analysis(prompt3, REPO_PATH)
+    all_warnings.extend(analysis_warnings)
+
+    enriched_prompt, context_warnings = inject_context(prompt4, REPO_PATH)
     all_warnings.extend(context_warnings)
 
     headers = {
