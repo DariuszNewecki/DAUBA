@@ -4,6 +4,9 @@ logs/
 # Utils it is functional testing only dir
 sandbox/
 
+docs/INTENT
+docs/manifests
+
 # Python backend
 __pycache__/
 *.pyc

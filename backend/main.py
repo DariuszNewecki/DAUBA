@@ -17,8 +17,9 @@ from context_handler import inject_context
 from include_handler import inject_includes
 from manifest_handler import inject_manifest
 from manifest_loader import load_manifest
-from test_runner import run_tests 
+from test_runner import run_tests
 from suggest_handler import inject_suggestions
+from project_manifest import get_project_goals, get_required_capabilities
 from file_handler import (
     add_pending_write,
     confirm_write,
@@ -38,7 +39,7 @@ if not all([LLM_API_URL, LLM_API_KEY, REPO_PATH]):
 
 FILE_WRITE_MARKER_PATTERN = re.compile(r"\[\[write:(.+?)\]\]\s*\n?([\s\S]*)", re.MULTILINE)
 
-app = FastAPI(title="DAUBA Backend API", version="0.4.2")
+app = FastAPI(title="DAUBA Backend API", version="0.6.0")
 
 @app.on_event("startup")
 async def startup_event():
@@ -65,6 +66,16 @@ class RejectWriteRequest(BaseModel):
     pending_id: str
     prompt: str
 
+class StageRequest(BaseModel):
+    prompt: str
+    suggested_path: str
+    code: str
+    repo_base_path: str
+
+class ConfirmRequest(BaseModel):
+    pending_id: str
+    repo_base_path: str
+
 
 # --- Routes ---
 
@@ -73,8 +84,19 @@ def ask_llm(data: PromptRequest):
     original_prompt = data.prompt
     all_warnings = []
 
-    # 1. Enrichment pipeline (sequential, but clearly separated)
-    prompt1, manifest_warnings = inject_manifest(original_prompt)
+    # Step 0: Inject manifest awareness
+    intent = get_project_goals()
+    capabilities = get_required_capabilities()
+    capability_summary = ", ".join(capabilities) if capabilities else "None"
+
+    prompt0 = (
+        f"# Project Intent\n{intent}\n\n"
+        f"# Required Capabilities\n{capability_summary}\n\n"
+        f"# User Prompt\n{original_prompt}"
+    )
+
+    # Step 1–4: Enrichment pipeline
+    prompt1, manifest_warnings = inject_manifest(prompt0)
     all_warnings.extend(manifest_warnings)
 
     prompt2, suggest_warnings = inject_suggestions(prompt1, REPO_PATH)
@@ -114,9 +136,7 @@ def ask_llm(data: PromptRequest):
             code_block_match = re.search(r"```(?:\w+)?\n([\s\S]*?)\n```", raw_after_marker)
             code_to_write = code_block_match.group(1).strip() if code_block_match else raw_after_marker
 
-            # Only validate `.py` files using Python-specific tooling
             is_python = suggested_path.endswith(".py")
-
             if is_python:
                 formatted_code, format_error = format_code_with_black(code_to_write)
                 if format_error:
@@ -154,7 +174,6 @@ def ask_llm(data: PromptRequest):
                 "code": code_to_write
             }
 
-        # No [[write:...]] directive → return raw output
         log_action("ask", {
             "prompt": original_prompt,
             "final_prompt_length": len(enriched_prompt),
@@ -197,15 +216,6 @@ def get_history():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not read history log: {e}")
 
-class StageRequest(BaseModel):
-    prompt: str
-    suggested_path: str
-    code: str
-    repo_base_path: str
-
-class ConfirmRequest(BaseModel):
-    pending_id: str
-    repo_base_path: str
 
 @app.post("/stage_write")
 def stage_write(req: StageRequest):
@@ -217,15 +227,17 @@ def stage_write(req: StageRequest):
     )
     return {"pending_id": pending_id}
 
+
 @app.post("/confirm_write")
 def confirm_write_route(req: ConfirmRequest):
     return confirm_write(req.pending_id, req.repo_base_path)
+
 
 @app.post("/run_tests")
 def run_tests_route():
     return run_tests(silent=False)
 
+
 @app.get("/")
 def root():
     return {"DAUBA": "alive"}
-
