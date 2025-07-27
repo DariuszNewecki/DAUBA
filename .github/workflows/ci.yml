@@ -1,0 +1,40 @@
+name: DAUBA CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install -e .
+          pip install ruff black pytest
+
+      - name: Run Ruff linter
+        run: .venv/bin/ruff .
+
+      - name: Check formatting with Black
+        run: .venv/bin/black --check .
+
+      - name: Run Pytest
+        run: .venv/bin/pytest tests/
